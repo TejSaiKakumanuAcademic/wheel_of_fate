@@ -291,6 +291,9 @@ function App() {
               excludePickedMembers={excludePickedMembers}
               setExcludePickedMembers={setExcludePickedMembers}
               groups={groups}
+              names={names}
+              setGroups={setGroups}
+              setNames={setNames}
             />
           </div>
         </div>
