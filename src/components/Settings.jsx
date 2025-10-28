@@ -1,32 +1,166 @@
 import React from 'react'
 import * as XLSX from 'xlsx'
 
-function Settings({ timerDuration, setTimerDuration, autoStartTimer, setAutoStartTimer, excludePickedMembers, setExcludePickedMembers, groups }) {
+function Settings({ timerDuration, setTimerDuration, autoStartTimer, setAutoStartTimer, excludePickedMembers, setExcludePickedMembers, groups, names, setGroups, setNames }) {
 
   const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(groups)
+    // Create workbook with multiple sheets
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Groups')
-    XLSX.writeFile(wb, 'wheel-of-fate-data.xlsx')
+    
+    // Export wheel names (without picked status)
+    const namesData = names.map(name => ({
+      Name: name.text
+    }))
+    const wsNames = XLSX.utils.json_to_sheet(namesData)
+    XLSX.utils.book_append_sheet(wb, wsNames, 'Wheel Names')
+    
+    // Export groups with their members
+    const groupsData = []
+    groups.forEach(group => {
+      if (group.names.length === 0) {
+        // If group is empty, still add a row with the group name
+        groupsData.push({
+          'Group Name': group.name,
+          'Member Name': ''
+        })
+      } else {
+        group.names.forEach(member => {
+          groupsData.push({
+            'Group Name': group.name,
+            'Member Name': member.text
+          })
+        })
+      }
+    })
+    const wsGroups = XLSX.utils.json_to_sheet(groupsData)
+    XLSX.utils.book_append_sheet(wb, wsGroups, 'Groups')
+    
+    // Download the file
+    XLSX.writeFile(wb, `wheel-of-fate-${new Date().toISOString().split('T')[0]}.xlsx`)
+    alert('✅ Data exported successfully!')
   }
 
   const handleImport = (event) => {
     const file = event.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
+    if (!file) {
+      return
+    }
+
+    // Warn user before importing
+    const hasExistingData = names.length > 0 || groups.length > 0
+    if (hasExistingData) {
+      const confirmImport = window.confirm(
+        '⚠️ WARNING: Importing will DELETE ALL existing data!\n\n' +
+        `Current data:\n` +
+        `- ${names.length} name(s) in wheel\n` +
+        `- ${groups.length} group(s)\n\n` +
+        'This action cannot be undone.\n\n' +
+        'TIP: Export your current data first as a backup!\n\n' +
+        'Do you want to continue?'
+      )
+      
+      if (!confirmImport) {
+        // Reset file input so user can select again
+        event.target.value = ''
+        return
+      }
+    }
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
         const data = new Uint8Array(e.target.result)
         const workbook = XLSX.read(data, { type: 'array' })
-        const sheet = workbook.Sheets[workbook.SheetNames[0]]
-        const json = XLSX.utils.sheet_to_json(sheet)
-        if (json.length > 0) {
-          // Handle imported data
-          console.log('Imported data:', json)
-          alert('Import functionality would update the groups here')
+        
+        let importedNames = []
+        let importedGroups = []
+        
+        // Import wheel names if sheet exists
+        if (workbook.SheetNames.includes('Wheel Names')) {
+          const wsNames = workbook.Sheets['Wheel Names']
+          const namesJson = XLSX.utils.sheet_to_json(wsNames)
+          importedNames = namesJson.map((row, index) => ({
+            id: `imported-${Date.now()}-${index}`,
+            text: row.Name || row.name || '',
+            color: getRandomColor(),
+            picked: false  // Always start as not picked on import
+          })).filter(n => n.text !== '')
         }
+        
+        // Import groups if sheet exists
+        if (workbook.SheetNames.includes('Groups')) {
+          const wsGroups = workbook.Sheets['Groups']
+          const groupsJson = XLSX.utils.sheet_to_json(wsGroups)
+          
+          // Group the data by group name
+          const groupsMap = new Map()
+          groupsJson.forEach(row => {
+            const groupName = row['Group Name'] || row.name || ''
+            const memberName = row['Member Name'] || row.member || ''
+            
+            if (groupName) {
+              if (!groupsMap.has(groupName)) {
+                groupsMap.set(groupName, [])
+              }
+              if (memberName) {
+                groupsMap.get(groupName).push(memberName)
+              }
+            }
+          })
+          
+          // Convert to groups array
+          importedGroups = Array.from(groupsMap.entries()).map(([groupName, members], index) => ({
+            id: `imported-group-${Date.now()}-${index}`,
+            name: groupName,
+            names: members.map((memberName, memberIndex) => ({
+              id: `imported-member-${Date.now()}-${index}-${memberIndex}`,
+              text: memberName,
+              color: getRandomColor(),
+              picked: true
+            }))
+          }))
+        }
+        
+        // Clear all existing data and set imported data
+        setNames(importedNames)
+        setGroups(importedGroups)
+        
+        alert(
+          '✅ Data imported successfully!\n\n' +
+          `Imported:\n` +
+          `- ${importedNames.length} name(s)\n` +
+          `- ${importedGroups.length} group(s)`
+        )
+      } catch (error) {
+        console.error('Import error:', error)
+        alert(
+          '❌ Error importing file!\n\n' +
+          'Please make sure:\n' +
+          '- File is a valid Excel file (.xlsx or .xls)\n' +
+          '- Sheet names are "Wheel Names" and/or "Groups"\n' +
+          '- Column headers match the expected format\n\n' +
+          'Error: ' + error.message
+        )
       }
-      reader.readAsArrayBuffer(file)
     }
+    
+    reader.onerror = () => {
+      alert('❌ Error reading file. Please try again.')
+    }
+    
+    reader.readAsArrayBuffer(file)
+    
+    // Reset the file input so the same file can be imported again
+    event.target.value = ''
+  }
+  
+  const getRandomColor = () => {
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+      '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8C471', '#82E0AA',
+      '#F1948A', '#7FB3D3', '#D7BDE2', '#A9DFBF', '#F9E79F'
+    ]
+    return colors[Math.floor(Math.random() * colors.length)]
   }
 
   return (
